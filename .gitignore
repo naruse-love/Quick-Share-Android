@@ -1,0 +1,22 @@
+*.iml
+.gradle
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# build output (any level)
+build/
+
+# build caches and logs
+.gradle_home/
+.gradle_test_home/
+.kotlin/
+.agents/
+*.log
+gradle_out.txt
+gradle_test_full.txt
