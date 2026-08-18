@@ -5,6 +5,7 @@ import com.quickshare.android.model.RemoteFile
 import com.quickshare.android.protocol.QuickShareStream
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
@@ -21,6 +22,11 @@ import java.util.concurrent.atomic.AtomicLong
 class SendReceiveFileCallTest {
 
     private val tempDir = File(System.getProperty("java.io.tmpdir"), "send_recv_test_${System.nanoTime()}").apply { mkdirs() }
+
+    @After
+    fun tearDown() {
+        tempDir.deleteRecursively()
+    }
 
     private fun createDummyFile(name: String, size: Long): File {
         val f = File(tempDir, name)
