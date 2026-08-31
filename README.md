@@ -18,7 +18,7 @@
 
 ## 📖 项目简介
 
-**Quick-Share-Android** 是一款基于 Kotlin 与 Jetpack Compose Material 3 构建的高性能 Android 局域网极速文件互传应用。配合桌面端 [Quick-Share-PC](../Quick-Share-PC)，实现 Android 手机与 Windows PC 之间免流、高速、低延迟的大文件与文件夹批量双向互传。
+**Quick-Share-Android** 是一款基于 Kotlin 与 Jetpack Compose Material 3 构建的高性能 Android 局域网极速文件互传应用。配合桌面端 [Quick-Share-PC](https://github.com/naruse-love/Quick-Share-PC)，实现 Android 手机与 Windows PC 之间免流、高速、低延迟的大文件与文件夹批量双向互传。
 
 本项目彻底重构移除了传统多物理网卡切片捆绑的复杂依赖，采用经过优化的**纯局域网高吞吐单流 TCP 管道**，结合 8×1MB 零 GC 预分配内存缓冲池与 64 位随机写入存储引擎，充分释放千兆 Wi-Fi 与以太网的极限 IO 性能。
 
