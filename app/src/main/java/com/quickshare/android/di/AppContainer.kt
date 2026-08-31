@@ -3,6 +3,8 @@ package com.quickshare.android.di
 import android.content.Context
 import com.quickshare.android.data.AppConfigRepository
 import com.quickshare.android.data.IAppConfigRepository
+import com.quickshare.android.data.ITransferHistoryRepository
+import com.quickshare.android.data.TransferHistoryRepository
 import com.quickshare.android.network.QuickShareClient
 import com.quickshare.android.network.QuickShareServer
 import com.quickshare.android.network.IQuickShareClient
@@ -24,6 +26,7 @@ interface AppContainer {
     val quickShareClient: IQuickShareClient
     val quickShareServer: IQuickShareServer
     val appConfigRepository: IAppConfigRepository
+    val transferHistoryRepository: ITransferHistoryRepository
 }
 
 class DefaultAppContainer(override val context: Context) : AppContainer {
@@ -62,5 +65,9 @@ class DefaultAppContainer(override val context: Context) : AppContainer {
 
     override val appConfigRepository: IAppConfigRepository by lazy {
         AppConfigRepository(context)
+    }
+
+    override val transferHistoryRepository: ITransferHistoryRepository by lazy {
+        TransferHistoryRepository(context)
     }
 }

@@ -1,5 +1,6 @@
 package com.quickshare.android.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -214,6 +215,7 @@ fun TransferDashboardScreen(
 
 @Composable
 private fun TaskHistoryRow(task: TransferTask) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(
@@ -222,6 +224,16 @@ private fun TaskHistoryRow(task: TransferTask) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 2.dp)
+            .clickable {
+                val path = if (task.filePath.isNotEmpty()) {
+                    task.filePath
+                } else {
+                    val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                    val candidate = java.io.File(downloadDir, task.fileName)
+                    if (candidate.exists()) candidate.absolutePath else java.io.File("/sdcard/Download", task.fileName).absolutePath
+                }
+                com.quickshare.android.util.FileOpener.openFile(context, path)
+            }
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,

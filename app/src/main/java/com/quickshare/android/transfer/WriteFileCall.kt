@@ -40,11 +40,19 @@ class WriteFileCall(
         storageManager = storageManager
     )
 
+    val isCanceled: Boolean
+        get() = canceled
+
     /**
      * Acquires a reusable 1MB byte buffer from the [BufferPool].
      */
-    fun getBuffer(): ByteArray {
-        return bufferPool.acquire()
+    fun getBuffer(timeoutMs: Long = 30000): ByteArray? {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (!canceled && System.currentTimeMillis() < deadline) {
+            val buf = bufferPool.acquire(500)
+            if (buf != null) return buf
+        }
+        return null
     }
 
     /**
@@ -52,6 +60,12 @@ class WriteFileCall(
      */
     fun putBlock(block: FileBlock, channelIndex: Int = 0) {
         synchronized(lock) {
+            if (canceled) {
+                if (block.data != null) {
+                    bufferPool.release(block.data)
+                }
+                return
+            }
             queue.addLast(block)
             (lock as Object).notifyAll()
         }
@@ -142,17 +156,16 @@ class WriteFileCall(
                 }
 
                 // Write chunk payload to disk
-                if (block.data != null && block.dataLength > 0) {
-                    currentHandle?.write(block.data, 0, block.dataLength)
-                    cursor += block.dataLength
+                if (block.data != null) {
+                    if (block.dataLength > 0) {
+                        currentHandle?.write(block.data, 0, block.dataLength)
+                        cursor += block.dataLength
+                    }
                     // Recycle buffer back to BufferPool immediately
                     bufferPool.release(block.data)
                 } else if (block.totalSize == 0L) {
-                    // Empty file handling: truncate length to 0 and recycle buffer
+                    // Empty file handling: truncate length to 0
                     currentHandle?.setLength(0L)
-                    if (block.data != null) {
-                        bufferPool.release(block.data)
-                    }
                 }
 
                 lastBlock = block

@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Deselect
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
@@ -241,25 +242,45 @@ fun FileBrowserScreen(
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
-                    Text(
-                        text = "已选中 ${uiState.selectedFiles.size} 项",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        IconButton(onClick = { viewModel.clearSelection() }) {
+                            Icon(Icons.Default.Clear, contentDescription = "取消选择")
+                        }
+                        Text(
+                            text = "已选 ${uiState.selectedFiles.size} 项",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IconButton(onClick = { viewModel.selectAll() }) {
-                            Icon(Icons.Default.SelectAll, contentDescription = "Select All")
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val currentFiles = if (uiState.activeTab == BrowserTab.LOCAL) uiState.localFiles else uiState.remoteFiles
+                        val isAllSelected = currentFiles.isNotEmpty() && uiState.selectedFiles.size >= currentFiles.size
+
+                        if (isAllSelected) {
+                            IconButton(onClick = { viewModel.clearSelection() }) {
+                                Icon(Icons.Default.Deselect, contentDescription = "取消全选", tint = MaterialTheme.colorScheme.primary)
+                            }
+                        } else {
+                            IconButton(onClick = { viewModel.selectAll() }) {
+                                Icon(Icons.Default.SelectAll, contentDescription = "全选")
+                            }
                         }
 
                         IconButton(onClick = { showCreateDirDialog = true }) {
-                            Icon(Icons.Default.CreateNewFolder, contentDescription = "New Folder")
+                            Icon(Icons.Default.CreateNewFolder, contentDescription = "新建文件夹")
                         }
 
                         IconButton(onClick = { showDeleteConfirmDialog = true }) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                            Icon(Icons.Default.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.error)
                         }
 
                         Button(

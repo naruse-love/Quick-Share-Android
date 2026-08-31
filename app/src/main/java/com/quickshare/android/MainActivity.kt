@@ -24,6 +24,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.quickshare.android.ui.components.QuickShareBottomBar
 import com.quickshare.android.ui.components.QuickShareTopAppBar
@@ -100,8 +102,13 @@ class MainActivity : ComponentActivity() {
                             is UiEvent.NavigateToTab -> {
                                 val destination = NavDestination.entries.find { it.tab == event.tab }
                                 if (destination != null) {
+                                    mainViewModel.selectTab(event.tab)
                                     navController.navigate(destination.route) {
+                                        popUpTo(navController.graph.findStartDestination().id) {
+                                            saveState = true
+                                        }
                                         launchSingleTop = true
+                                        restoreState = true
                                     }
                                 }
                             }
@@ -140,18 +147,22 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                val navBackStackEntry by navController.currentBackStackEntryAsState()
+                val currentRoute = navBackStackEntry?.destination?.route
+                val currentDestination = NavDestination.fromRoute(currentRoute)
+
                 Scaffold(
                     topBar = {
                         QuickShareTopAppBar(uiState = mainUiState)
                     },
                     bottomBar = {
                         QuickShareBottomBar(
-                            currentTab = mainUiState.currentTab,
+                            currentTab = currentDestination.tab,
                             badgeCount = mainUiState.activeTransferBadgeCount,
                             onTabSelected = { destination ->
                                 mainViewModel.selectTab(destination.tab)
                                 navController.navigate(destination.route) {
-                                    popUpTo(navController.graph.startDestinationId) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
                                         saveState = true
                                     }
                                     launchSingleTop = true

@@ -66,8 +66,13 @@ class ReceiveFileCall(
                             totalSize
                         )
 
-                        val buffer = writeFileCall.getBuffer()
-                        if (length > 0) {
+                        val buffer = if (length > 0) writeFileCall.getBuffer() else null
+                        if (length > 0 && (buffer == null || writeFileCall.isCanceled)) {
+                            writeFileCall.cancel()
+                            return@withContext
+                        }
+
+                        if (length > 0 && buffer != null) {
                             channel.readFully(buffer, 0, length)
                             connection.addDownloadedBytes(length.toLong())
                         }

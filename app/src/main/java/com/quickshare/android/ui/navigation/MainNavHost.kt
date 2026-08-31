@@ -2,6 +2,7 @@ package com.quickshare.android.ui.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -9,6 +10,7 @@ import com.quickshare.android.ui.screens.ConnectionScreen
 import com.quickshare.android.ui.screens.FileBrowserScreen
 import com.quickshare.android.ui.screens.ServerModeScreen
 import com.quickshare.android.ui.screens.TransferDashboardScreen
+import com.quickshare.android.ui.viewmodel.AppTab
 import com.quickshare.android.ui.viewmodel.ConnectionViewModel
 import com.quickshare.android.ui.viewmodel.FileBrowserViewModel
 import com.quickshare.android.ui.viewmodel.MainViewModel
@@ -34,13 +36,23 @@ fun MainNavHost(
             ConnectionScreen(
                 viewModel = connectionViewModel,
                 onNavigateToFiles = {
+                    mainViewModel.selectTab(AppTab.FILE_BROWSER)
                     navController.navigate(NavDestination.FILE_BROWSER.route) {
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
                         launchSingleTop = true
+                        restoreState = true
                     }
                 },
                 onNavigateToDashboard = {
+                    mainViewModel.selectTab(AppTab.DASHBOARD)
                     navController.navigate(NavDestination.DASHBOARD.route) {
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
                         launchSingleTop = true
+                        restoreState = true
                     }
                 }
             )
@@ -50,8 +62,13 @@ fun MainNavHost(
             ServerModeScreen(
                 viewModel = serverModeViewModel,
                 onNavigateToDashboard = {
+                    mainViewModel.selectTab(AppTab.DASHBOARD)
                     navController.navigate(NavDestination.DASHBOARD.route) {
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
                         launchSingleTop = true
+                        restoreState = true
                     }
                 }
             )
@@ -61,8 +78,13 @@ fun MainNavHost(
             FileBrowserScreen(
                 viewModel = fileBrowserViewModel,
                 onNavigateToDashboard = {
+                    mainViewModel.selectTab(AppTab.DASHBOARD)
                     navController.navigate(NavDestination.DASHBOARD.route) {
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
                         launchSingleTop = true
+                        restoreState = true
                     }
                 }
             )
@@ -72,8 +94,13 @@ fun MainNavHost(
             TransferDashboardScreen(
                 viewModel = transferDashboardViewModel,
                 onNavigateToBrowser = {
+                    mainViewModel.selectTab(AppTab.FILE_BROWSER)
                     navController.navigate(NavDestination.FILE_BROWSER.route) {
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
                         launchSingleTop = true
+                        restoreState = true
                     }
                 }
             )

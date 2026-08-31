@@ -38,6 +38,7 @@ import kotlinx.coroutines.withContext
 import java.io.Closeable
 import java.io.EOFException
 import java.io.File
+import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -434,39 +435,60 @@ class QuickShareServer(
         )
         _activeTransfers.value = listOf(task)
 
+        val writeFileCall = WriteFileCall(pool, dataConnections.size, storageManager)
         try {
-            val writeFileCall = WriteFileCall(pool, dataConnections.size, storageManager)
-            val writeJob = launch { writeFileCall.executeAsync() }
+            supervisorScope {
+                val writeJob = launch {
+                    try {
+                        writeFileCall.executeAsync()
+                    } catch (t: Throwable) {
+                        writeFileCall.cancel()
+                        throw t
+                    }
+                }
 
-            val recvJobs = dataConnections.mapIndexed { idx, conn ->
-                launch {
-                    val recvCall = ReceiveFileCall(
-                        channelIndex = idx,
-                        connection = conn,
-                        writeFileCall = writeFileCall,
-                        onProgress = { _, _, _, totalSize ->
-                            if (task.size < totalSize) task = task.copy(size = totalSize)
-                            val totalRecv = dataConnections.sumOf { it.getTotalTraffic().downloadTraffic }
-                            val currentT = task.withBytesTransferred(minOf(totalRecv, task.size))
-                            task = currentT
-                            _activeTransfers.value = listOf(currentT)
+                val recvJobs = dataConnections.mapIndexed { idx, conn ->
+                    launch {
+                        try {
+                            val recvCall = ReceiveFileCall(
+                                channelIndex = idx,
+                                connection = conn,
+                                writeFileCall = writeFileCall,
+                                onProgress = { _, _, _, totalSize ->
+                                    if (task.size < totalSize) task = task.copy(size = totalSize)
+                                    val totalRecv = dataConnections.sumOf { it.getTotalTraffic().downloadTraffic }
+                                    val currentT = task.withBytesTransferred(minOf(totalRecv, task.size))
+                                    task = currentT
+                                    _activeTransfers.value = listOf(currentT)
+                                }
+                            )
+                            recvCall.executeAsync()
+                        } catch (t: Throwable) {
+                            writeFileCall.cancel()
+                            throw t
                         }
-                    )
-                    recvCall.executeAsync()
+                    }
+                }
+
+                trafficManager.startMonitoring(
+                    connections = dataConnections,
+                    taskTotalSize = task.size,
+                    direction = TransferDirection.RECEIVE,
+                    transferredBytesProvider = { dataConnections.sumOf { it.getTotalTraffic().downloadTraffic } },
+                    coroutineScope = this
+                )
+
+                try {
+                    writeJob.join()
+                    recvJobs.joinAll()
+                } finally {
+                    trafficManager.stopMonitoring()
+                }
+
+                if (writeFileCall.isCanceled) {
+                    throw IOException("Write operation failed or was canceled")
                 }
             }
-
-            trafficManager.startMonitoring(
-                connections = dataConnections,
-                taskTotalSize = task.size,
-                direction = TransferDirection.RECEIVE,
-                transferredBytesProvider = { dataConnections.sumOf { it.getTotalTraffic().downloadTraffic } },
-                coroutineScope = this
-            )
-
-            writeJob.join()
-            recvJobs.joinAll()
-            trafficManager.stopMonitoring()
 
             // Report write success to client
             stream.writeBoolean(true)
@@ -482,6 +504,7 @@ class QuickShareServer(
             }
         } catch (e: Throwable) {
             trafficManager.stopMonitoring()
+            writeFileCall.cancel()
             try {
                 stream.writeBoolean(false)
                 stream.writeUTF(e.message ?: "Write Error")

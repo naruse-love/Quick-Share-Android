@@ -168,7 +168,10 @@ interface IStorageManager {
 /**
  * Direct Unix POSIX storage engine for all-files access or app-specific sandbox storage.
  */
-class DirectStorageEngine(private val baseDir: File? = null) : IStorageManager {
+class DirectStorageEngine(
+    private val baseDir: File? = null,
+    private val context: Context? = null
+) : IStorageManager {
 
     private fun resolveFile(path: String): File {
         val f = File(path)
@@ -196,9 +199,34 @@ class DirectStorageEngine(private val baseDir: File? = null) : IStorageManager {
 
     override fun openRandomAccess(path: String, mode: String): RandomAccessHandle {
         val file = resolveFile(path)
-        file.parentFile?.mkdirs()
-        val raf = RandomAccessFile(file, mode)
-        return DirectRandomAccessHandle(raf)
+        try {
+            file.parentFile?.mkdirs()
+            val raf = RandomAccessFile(file, mode)
+            return DirectRandomAccessHandle(raf)
+        } catch (e: Throwable) {
+            if (mode.contains("w")) {
+                // 1. Try public Download directory
+                try {
+                    val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    val fallbackFile = File(downloads, file.name)
+                    fallbackFile.parentFile?.mkdirs()
+                    val raf = RandomAccessFile(fallbackFile, mode)
+                    return DirectRandomAccessHandle(raf)
+                } catch (_: Throwable) {}
+
+                // 2. Try app external files directory
+                if (context != null) {
+                    try {
+                        val appExt = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+                        val fallbackApp = File(appExt, file.name)
+                        fallbackApp.parentFile?.mkdirs()
+                        val raf = RandomAccessFile(fallbackApp, mode)
+                        return DirectRandomAccessHandle(raf)
+                    } catch (_: Throwable) {}
+                }
+            }
+            throw if (e is Exception) e else RuntimeException(e)
+        }
     }
 
     override fun listFiles(dirPath: String): List<RemoteFile> {
@@ -418,7 +446,7 @@ class SafStorageEngine(private val context: Context? = null) : IStorageManager {
  */
 class StorageManager(
     private val context: Context? = null,
-    val directEngine: DirectStorageEngine = DirectStorageEngine(),
+    val directEngine: DirectStorageEngine = DirectStorageEngine(null, context),
     val safEngine: SafStorageEngine = SafStorageEngine(context)
 ) : IStorageManager {
 

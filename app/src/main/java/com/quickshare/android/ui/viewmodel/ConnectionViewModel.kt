@@ -188,7 +188,8 @@ class ConnectionViewModel(
                 targetPort = port,
                 selectedNics = selectedNics,
                 timeoutMs = 5000,
-                interfaceEnumerator = interfaceEnumerator
+                interfaceEnumerator = interfaceEnumerator,
+                localHomeDir = appConfigRepo.appConfig.value.saveDirectory
             )
 
             when (result) {

@@ -45,7 +45,8 @@ class QuickShareViewModelFactory(
                 TransferDashboardViewModel(
                     trafficManager = appContainer.trafficManager,
                     quickShareClient = appContainer.quickShareClient,
-                    quickShareServer = appContainer.quickShareServer
+                    quickShareServer = appContainer.quickShareServer,
+                    transferHistoryRepo = appContainer.transferHistoryRepository
                 ) as T
             }
             else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

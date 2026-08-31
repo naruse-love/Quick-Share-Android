@@ -2,6 +2,7 @@ package com.quickshare.android.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.quickshare.android.data.ITransferHistoryRepository
 import com.quickshare.android.model.TransferStatus
 import com.quickshare.android.model.TransferTask
 import com.quickshare.android.network.ChannelTrafficSnapshot
@@ -31,13 +32,33 @@ data class TransferDashboardUiState(
 class TransferDashboardViewModel(
     private val trafficManager: ITrafficManager,
     private val quickShareClient: IQuickShareClient,
-    private val quickShareServer: IQuickShareServer
+    private val quickShareServer: IQuickShareServer,
+    private val transferHistoryRepo: ITransferHistoryRepository? = null
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(TransferDashboardUiState())
+    private val _uiState = MutableStateFlow(
+        TransferDashboardUiState(
+            completedTasks = transferHistoryRepo?.completedHistory?.value ?: emptyList(),
+            failedTasks = transferHistoryRepo?.failedHistory?.value ?: emptyList()
+        )
+    )
     val uiState: StateFlow<TransferDashboardUiState> = _uiState.asStateFlow()
 
     init {
+        // Observe persistent completed history
+        if (transferHistoryRepo != null) {
+            viewModelScope.launch {
+                transferHistoryRepo.completedHistory.collect { history ->
+                    _uiState.update { it.copy(completedTasks = history) }
+                }
+            }
+            viewModelScope.launch {
+                transferHistoryRepo.failedHistory.collect { history ->
+                    _uiState.update { it.copy(failedTasks = history) }
+                }
+            }
+        }
+
         // Observe real-time 1s window traffic snapshot from TrafficManager
         viewModelScope.launch {
             trafficManager.trafficState.collect { snapshot ->
@@ -83,6 +104,7 @@ class TransferDashboardViewModel(
                     state.copy(activeTask = task, isTransferActive = true)
                 }
                 TransferStatus.COMPLETED -> {
+                    transferHistoryRepo?.addCompletedTask(task)
                     val completed = state.completedTasks.toMutableList()
                     if (completed.none { it.id == task.id }) {
                         completed.add(0, task)
@@ -90,6 +112,7 @@ class TransferDashboardViewModel(
                     state.copy(activeTask = null, completedTasks = completed, isTransferActive = false)
                 }
                 TransferStatus.FAILED, TransferStatus.CANCELLED -> {
+                    transferHistoryRepo?.addFailedTask(task)
                     val failed = state.failedTasks.toMutableList()
                     if (failed.none { it.id == task.id }) {
                         failed.add(0, task)
@@ -107,6 +130,7 @@ class TransferDashboardViewModel(
         val current = _uiState.value.activeTask
         if (current != null) {
             val cancelledTask = current.withStatus(TransferStatus.CANCELLED, "用户已取消传输")
+            transferHistoryRepo?.addFailedTask(cancelledTask)
             _uiState.update { state ->
                 val failed = state.failedTasks.toMutableList()
                 if (failed.none { it.id == current.id }) {
@@ -126,6 +150,7 @@ class TransferDashboardViewModel(
     }
 
     fun clearTaskHistory() {
+        transferHistoryRepo?.clearHistory()
         _uiState.update {
             it.copy(
                 completedTasks = emptyList(),

@@ -115,6 +115,6 @@ class QuickShareStream(
     }
 
     companion object {
-        private const val BUFFER_SIZE = 64 * 1024 // 64KB stream buffer
+        private const val BUFFER_SIZE = 512 * 1024 // 512KB high-throughput stream buffer
     }
 }

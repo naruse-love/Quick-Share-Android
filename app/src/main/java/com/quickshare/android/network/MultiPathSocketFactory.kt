@@ -39,7 +39,7 @@ interface IMultiPathSocketFactory {
 class MultiPathSocketFactory : IMultiPathSocketFactory {
 
     companion object {
-        const val SOCKET_BUFFER_SIZE: Int = 1024 * 1024 // 1MB Socket Buffer
+        const val SOCKET_BUFFER_SIZE: Int = 4 * 1024 * 1024 // 4MB High-Throughput Socket Buffer
         const val DEFAULT_TIMEOUT_MS: Int = 30000        // 30s Read Timeout
         const val CONNECT_TIMEOUT_MS: Int = 5000        // 5s Connect Timeout
     }
