@@ -64,6 +64,8 @@ class MainViewModel(
         // Observe app config
         viewModelScope.launch {
             appConfigRepo.appConfig.collect { config ->
+                quickShareClient.enable4KFriendly = config.enable4KFriendly
+                quickShareServer.enable4KFriendly = config.enable4KFriendly
                 _uiState.update { it.copy(appConfig = config) }
             }
         }
@@ -131,5 +133,9 @@ class MainViewModel(
 
     fun updateKeepScreenOn(enabled: Boolean) {
         appConfigRepo.updateConfig { it.copy(keepScreenOn = enabled) }
+    }
+
+    fun update4KFriendly(enabled: Boolean) {
+        appConfigRepo.updateConfig { it.copy(enable4KFriendly = enabled) }
     }
 }

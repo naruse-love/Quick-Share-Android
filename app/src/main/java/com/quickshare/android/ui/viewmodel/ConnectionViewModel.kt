@@ -35,6 +35,7 @@ data class ConnectionUiState(
     val connectionHistory: List<ConnectionHistoryItem> = emptyList(),
     val errorMessage: String? = null,
     val isConnecting: Boolean = false,
+    val enable4KFriendly: Boolean = false,
     val portPresets: List<Int> = listOf(18888, 29999, 8080, 5740)
 )
 
@@ -48,6 +49,14 @@ class ConnectionViewModel(
     val uiState: StateFlow<ConnectionUiState> = _uiState.asStateFlow()
 
     init {
+        // Observe app config for 4K Friendly mode
+        viewModelScope.launch {
+            appConfigRepo.appConfig.collect { config ->
+                _uiState.update { it.copy(enable4KFriendly = config.enable4KFriendly) }
+                quickShareClient.enable4KFriendly = config.enable4KFriendly
+            }
+        }
+
         // Observe connection history
         viewModelScope.launch {
             appConfigRepo.connectionHistory.collect { history ->
@@ -159,6 +168,11 @@ class ConnectionViewModel(
 
     fun clearHistory() {
         appConfigRepo.clearConnectionHistory()
+    }
+
+    fun on4KFriendlyToggled(enabled: Boolean) {
+        appConfigRepo.updateConfig { it.copy(enable4KFriendly = enabled) }
+        quickShareClient.enable4KFriendly = enabled
     }
 
     fun connect() {

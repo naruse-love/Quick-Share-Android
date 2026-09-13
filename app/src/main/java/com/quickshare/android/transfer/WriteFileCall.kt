@@ -3,9 +3,12 @@ package com.quickshare.android.transfer
 import com.quickshare.android.model.FileBlock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.IOException
+import java.nio.charset.StandardCharsets
 import java.util.ArrayDeque
 import java.util.concurrent.BlockingQueue
+import java.util.zip.ZipInputStream
 
 /**
  * Sequential LAN Stream Disk Writer for QuickShareProtocol v300.
@@ -119,15 +122,17 @@ class WriteFileCall(
     private fun executeInternal() {
         var lastBlock: FileBlock? = null
         var cursor = 0L
+        val createdDirectories = mutableListOf<Pair<String, Long>>()
 
         try {
             var block = takeBlock()
 
             while (block != null) {
                 if (!block.isFile) {
-                    // Directory metadata frame: create directory hierarchy and restore timestamp
+                    // Directory metadata frame: create directory hierarchy and record timestamp
                     storageManager.mkdirs(block.path)
                     if (block.lastModified > 0L) {
+                        createdDirectories.add(Pair(block.path, block.lastModified))
                         storageManager.setLastModified(block.path, block.lastModified)
                     }
                     block = takeBlock()
@@ -139,10 +144,7 @@ class WriteFileCall(
                 // Detect transition to a different file
                 if (lastBlock == null || lastBlock.path != block.path) {
                     if (currentHandle != null) {
-                        closeCurrentFile()
-                        if (lastBlock != null && lastBlock.lastModified > 0L) {
-                            storageManager.setLastModified(lastBlock.path, lastBlock.lastModified)
-                        }
+                        handleCompletedFile(lastBlock)
                     }
                     currentHandle = createAndOpenFile(block.path, block.totalSize)
                     cursor = 0L
@@ -174,10 +176,14 @@ class WriteFileCall(
 
             // Close the final file and restore its timestamp
             if (lastBlock != null) {
-                closeCurrentFile()
-                if (lastBlock.lastModified > 0L) {
-                    storageManager.setLastModified(lastBlock.path, lastBlock.lastModified)
-                }
+                handleCompletedFile(lastBlock)
+            }
+
+            // Re-apply directory timestamps in reverse order (bottom-up / deepest first)
+            // because writing/extracting child files updates the parent directory's modification time.
+            for (i in createdDirectories.indices.reversed()) {
+                val (dirPath, lastModified) = createdDirectories[i]
+                storageManager.setLastModified(dirPath, lastModified)
             }
         } catch (t: Throwable) {
             cancel()
@@ -229,6 +235,62 @@ class WriteFileCall(
         } catch (_: Throwable) {
         } finally {
             currentHandle = null
+        }
+    }
+
+    private fun handleCompletedFile(block: FileBlock?) {
+        if (block == null) return
+        closeCurrentFile()
+        if (block.lastModified > 0L) {
+            storageManager.setLastModified(block.path, block.lastModified)
+        }
+        tryExtractAndCleanupBatchZip(block.path)
+    }
+
+    private fun tryExtractAndCleanupBatchZip(path: String) {
+        val fileName = File(path).name
+        if (fileName.startsWith("__qs_batch_") && fileName.endsWith(".zip")) {
+            try {
+                val normalizedPath = path.replace('\\', '/')
+                val lastSlash = normalizedPath.lastIndexOf('/')
+                val parentPath = if (lastSlash >= 0) normalizedPath.substring(0, lastSlash) else ""
+
+                storageManager.openForRead(path).use { inputStream ->
+                    ZipInputStream(inputStream, StandardCharsets.UTF_8).use { zis ->
+                        var entry = zis.nextEntry
+                        while (entry != null) {
+                            if (!entry.isDirectory && entry.name.isNotEmpty()) {
+                                val normalizedEntryName = entry.name.replace('\\', '/')
+                                val entryCleanName = normalizedEntryName.substringAfterLast('/')
+                                if (entryCleanName.isNotEmpty() && entryCleanName != "." && entryCleanName != "..") {
+                                    val destFilePath = if (parentPath.isEmpty()) entryCleanName else "$parentPath/$entryCleanName"
+                                    storageManager.createParentDirIfNotExists(destFilePath)
+                                    val handle = storageManager.openRandomAccess(destFilePath, "rw")
+                                    try {
+                                        handle.setLength(0L)
+                                        val buffer = ByteArray(64 * 1024)
+                                        var bytesRead: Int
+                                        while (zis.read(buffer).also { bytesRead = it } != -1) {
+                                            handle.write(buffer, 0, bytesRead)
+                                        }
+                                        handle.flush()
+                                    } finally {
+                                        handle.close()
+                                    }
+                                    if (entry.time > 0) {
+                                        storageManager.setLastModified(destFilePath, entry.time)
+                                    }
+                                }
+                            }
+                            zis.closeEntry()
+                            entry = zis.nextEntry
+                        }
+                    }
+                }
+                storageManager.delete(path)
+            } catch (e: Throwable) {
+                System.err.println("Warning: Failed to extract batch zip $path: ${e.message}")
+            }
         }
     }
 }

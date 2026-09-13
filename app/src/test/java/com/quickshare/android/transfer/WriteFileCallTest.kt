@@ -158,4 +158,145 @@ class WriteFileCallTest {
         // Buffers must be returned to pool
         assertEquals(4, pool.availableCount())
     }
+
+    @Test
+    fun testAutoExtractBatchZipAndCleanup() = runBlocking {
+        val pool = BufferPool(8, 1024 * 1024)
+        val engine = DirectStorageEngine(tempDir)
+        val writeFileCall = WriteFileCall(pool, channelCount = 1, storageManager = engine)
+
+        val writerJob = async {
+            writeFileCall.executeAsync()
+        }
+
+        // Create a batch zip in memory with 2 files
+        val timeA = 1650000000000L
+        val timeB = 1680000000000L
+        val baos = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(baos).use { zos ->
+            val eA = java.util.zip.ZipEntry("extracted_a.txt").apply { time = timeA }
+            zos.putNextEntry(eA)
+            zos.write("Content of extracted file A".toByteArray())
+            zos.closeEntry()
+
+            val eB = java.util.zip.ZipEntry("extracted_b.txt").apply { time = timeB }
+            zos.putNextEntry(eB)
+            zos.write("Content of extracted file B".toByteArray())
+            zos.closeEntry()
+        }
+        val zipBytes = baos.toByteArray()
+
+        val buf = pool.acquire()!!
+        System.arraycopy(zipBytes, 0, buf, 0, zipBytes.size)
+
+        val zipBlock = FileBlock(
+            isFile = true,
+            fileIndex = 0,
+            path = "__qs_batch_12345678.zip",
+            lastModified = System.currentTimeMillis(),
+            totalSize = zipBytes.size.toLong(),
+            index = 0,
+            data = buf,
+            dataLength = zipBytes.size
+        )
+
+        writeFileCall.putBlock(zipBlock, 0)
+        writeFileCall.finishChannel(0)
+
+        writerJob.await()
+
+        val fileA = File(tempDir, "extracted_a.txt")
+        val fileB = File(tempDir, "extracted_b.txt")
+        assertTrue("extracted_a.txt should exist", fileA.exists())
+        assertTrue("extracted_b.txt should exist", fileB.exists())
+
+        assertEquals("Content of extracted file A", fileA.readText())
+        assertEquals("Content of extracted file B", fileB.readText())
+
+        // Verify timestamps (within 3 seconds due to DOS 2-second granularity)
+        assertTrue("Timestamp A close to original", Math.abs(fileA.lastModified() - timeA) < 3000)
+        assertTrue("Timestamp B close to original", Math.abs(fileB.lastModified() - timeB) < 3000)
+
+        // Verify zip file was deleted
+        val zipFile = File(tempDir, "__qs_batch_12345678.zip")
+        assertFalse("Batch zip should be deleted after extraction", zipFile.exists())
+
+        // Verify buffers recycled
+        assertEquals(8, pool.availableCount())
+    }
+
+    @Test
+    fun testDirectoryTimestampPreservationWithBatchZip() = runBlocking {
+        val pool = BufferPool(8, 1024 * 1024)
+        val engine = DirectStorageEngine(tempDir)
+        val writeFileCall = WriteFileCall(pool, channelCount = 1, storageManager = engine)
+
+        val writerJob = async {
+            writeFileCall.executeAsync()
+        }
+
+        val expectedDirTime = 1600000000000L
+        val expectedFileTime = 1620000000000L
+
+        // 1. Send directory frame
+        val dirBlock = FileBlock(
+            isFile = false,
+            fileIndex = 0,
+            path = "TimedFolder",
+            lastModified = expectedDirTime,
+            totalSize = 0L,
+            index = 0,
+            data = null,
+            dataLength = 0
+        )
+        writeFileCall.putBlock(dirBlock, 0)
+
+        // 2. Prepare batch zip inside TimedFolder
+        val baos = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(baos).use { zos ->
+            val entry = java.util.zip.ZipEntry("inner.txt").apply { time = expectedFileTime }
+            zos.putNextEntry(entry)
+            zos.write("Inner file content".toByteArray())
+            zos.closeEntry()
+        }
+        val zipBytes = baos.toByteArray()
+
+        val buf = pool.acquire()!!
+        System.arraycopy(zipBytes, 0, buf, 0, zipBytes.size)
+
+        val zipBlock = FileBlock(
+            isFile = true,
+            fileIndex = 1,
+            path = "TimedFolder/__qs_batch_abcdef12.zip",
+            lastModified = System.currentTimeMillis(),
+            totalSize = zipBytes.size.toLong(),
+            index = 0,
+            data = buf,
+            dataLength = zipBytes.size
+        )
+
+        writeFileCall.putBlock(zipBlock, 0)
+        writeFileCall.finishChannel(0)
+
+        writerJob.await()
+
+        val targetDir = File(tempDir, "TimedFolder")
+        assertTrue("TimedFolder must exist", targetDir.exists() && targetDir.isDirectory)
+
+        val innerFile = File(targetDir, "inner.txt")
+        assertTrue("inner.txt must exist", innerFile.exists())
+        assertEquals("Inner file content", innerFile.readText())
+
+        // Verify inner file timestamp
+        assertTrue("Inner file timestamp close to original", Math.abs(innerFile.lastModified() - expectedFileTime) < 3000)
+
+        // Verify directory timestamp preserved bottom-up despite zip write, extraction, and deletion
+        assertTrue(
+            "Directory timestamp must be preserved within 3s, got ${targetDir.lastModified()} vs $expectedDirTime",
+            Math.abs(targetDir.lastModified() - expectedDirTime) < 3000
+        )
+
+        assertEquals(8, pool.availableCount())
+    }
 }
+

@@ -3,16 +3,23 @@ package com.quickshare.android.transfer
 import com.quickshare.android.model.FileBlock
 import com.quickshare.android.model.QuickShareDirectory
 import com.quickshare.android.model.RemoteFile
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.EOFException
 import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.BlockingQueue
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.zip.Deflater
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 /**
  * High-throughput file and directory slicing pipeline for pure LAN streaming.
@@ -26,7 +33,8 @@ class ReadFileCall(
     private val localDir: QuickShareDirectory,
     private val remoteDir: QuickShareDirectory,
     private val operateThreadCount: Int = 1,
-    private val storageResolver: ((path: String) -> InputStream)? = null
+    private val storageResolver: ((path: String) -> InputStream)? = null,
+    val enable4KFriendly: Boolean = false
 ) {
     private val deque: BlockingQueue<FileBlock> = LinkedBlockingQueue()
     private val fileIndexCounter = AtomicInteger(-1)
@@ -36,17 +44,34 @@ class ReadFileCall(
     private var isShutdown: Boolean = false
 
     companion object {
+        const val SMALL_FILE_THRESHOLD: Long = 128L * 1024L // 128KB threshold for 4K friendliness
         val END_POINT = FileBlock.END_POINT
         val INTERRUPT = FileBlock.INTERRUPT
         val READ_ERROR = FileBlock.READ_ERROR
         val WRITE_ERROR = FileBlock.WRITE_ERROR
     }
 
+    private data class BatchZipItem(
+        val transferPath: String,
+        val zipBytes: ByteArray,
+        val lastModified: Long
+    )
+
+    private val zipSentinel = BatchZipItem("", ByteArray(0), -1L)
+
     /**
      * Executes the slicing loop asynchronously.
      * Enqueues FOLDER and FILE blocks, concluding with [operateThreadCount] END_POINT markers.
      */
     suspend fun executeAsync() = withContext(Dispatchers.IO) {
+        if (enable4KFriendly) {
+            executeWith4KFriendly()
+        } else {
+            executeNormal()
+        }
+    }
+
+    private fun executeNormal() {
         try {
             for (file in files) {
                 if (isShutdown) break
@@ -77,6 +102,230 @@ class ReadFileCall(
                 }
             }
             throw e
+        }
+    }
+
+    suspend fun executeWith4KFriendly() = withContext(Dispatchers.IO) {
+        try {
+            val looseFiles = mutableListOf<RemoteFile>()
+            val allDirs = mutableListOf<RemoteFile>()
+            val bigFiles = mutableListOf<RemoteFile>()
+            val smallFilesByDir = mutableMapOf<String, MutableList<RemoteFile>>()
+
+            // 1. Separate loose files and folder hierarchies
+            for (file in files) {
+                if (isShutdown) break
+                if (storageResolver == null && !fileExists(file.path)) continue
+
+                if (file.isDirectory) {
+                    traverseDirectoryTree(file, allDirs, bigFiles, smallFilesByDir)
+                } else {
+                    looseFiles.add(file)
+                }
+            }
+
+            // 2. Start background compression pipeline
+            val zipQueue: BlockingQueue<BatchZipItem> = LinkedBlockingQueue(32)
+            var compressionError: Throwable? = null
+
+            val compressionJob = CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    for ((dirPath, smallFiles) in smallFilesByDir) {
+                        if (isShutdown) break
+                        if (smallFiles.isEmpty()) continue
+
+                        val zipBytes = createZipArchiveForFiles(smallFiles)
+                        if (isShutdown) break
+
+                        val hashHex = (dirPath.hashCode().toLong() and 0xFFFFFFFFL).toString(16).padStart(8, '0')
+                        val batchFileName = "__qs_batch_${hashHex}.zip"
+                        val zipLocalPath = if (dirPath.endsWith("/") || dirPath.endsWith("\\")) {
+                            "$dirPath$batchFileName"
+                        } else {
+                            "$dirPath${File.separator}$batchFileName"
+                        }
+                        val transferPath = localDir.generateTransferPath(zipLocalPath, remoteDir)
+                        val lastModified = smallFiles.maxOfOrNull { it.lastModified } ?: System.currentTimeMillis()
+
+                        while (!isShutdown) {
+                            if (zipQueue.offer(BatchZipItem(transferPath, zipBytes, lastModified), 50, TimeUnit.MILLISECONDS)) {
+                                break
+                            }
+                        }
+                    }
+                } catch (t: Throwable) {
+                    compressionError = t
+                } finally {
+                    while (!isShutdown) {
+                        if (zipQueue.offer(zipSentinel, 50, TimeUnit.MILLISECONDS)) {
+                            break
+                        }
+                    }
+                }
+            }
+
+            // 3. Phase 1: Stream directory metadata, loose files, and big files
+            for (dir in allDirs) {
+                if (isShutdown || compressionError != null) break
+                val currentFileIndex = fileIndexCounter.incrementAndGet()
+                val transferPath = localDir.generateTransferPath(dir.path, remoteDir)
+                synchronized(queueLock) {
+                    if (!isShutdown) {
+                        deque.put(
+                            FileBlock(
+                                isFile = false,
+                                fileIndex = currentFileIndex,
+                                path = transferPath,
+                                lastModified = dir.lastModified,
+                                totalSize = 0L,
+                                index = 0,
+                                data = null,
+                                dataLength = 0
+                            )
+                        )
+                    }
+                }
+            }
+
+            for (file in looseFiles) {
+                if (isShutdown || compressionError != null) break
+                readToDeque(file)
+            }
+
+            for (file in bigFiles) {
+                if (isShutdown || compressionError != null) break
+                readToDeque(file)
+            }
+
+            // 4. Phase 2: Stream batch ZIP packages
+            while (!isShutdown) {
+                val item = zipQueue.poll(50, TimeUnit.MILLISECONDS) ?: continue
+                if (item === zipSentinel || (item.lastModified == -1L && item.transferPath.isEmpty())) {
+                    break
+                }
+                enqueueZipData(item.transferPath, item.zipBytes, item.lastModified)
+            }
+
+            compressionJob.join()
+            compressionError?.let { throw it }
+
+            synchronized(queueLock) {
+                if (!isShutdown) {
+                    for (i in 0 until operateThreadCount) {
+                        deque.put(END_POINT)
+                    }
+                }
+            }
+        } catch (e: Throwable) {
+            synchronized(queueLock) {
+                if (!isShutdown) {
+                    for (i in 0 until operateThreadCount) {
+                        deque.put(READ_ERROR)
+                    }
+                }
+            }
+            throw e
+        }
+    }
+
+    private fun traverseDirectoryTree(
+        folder: RemoteFile,
+        allDirs: MutableList<RemoteFile>,
+        bigFiles: MutableList<RemoteFile>,
+        smallFilesByDir: MutableMap<String, MutableList<RemoteFile>>
+    ) {
+        allDirs.add(folder)
+        val dirList = smallFilesByDir.getOrPut(folder.path) { mutableListOf() }
+        val subItems = listLocalFiles(folder.path)
+        for (item in subItems) {
+            if (item.isDirectory) {
+                traverseDirectoryTree(item, allDirs, bigFiles, smallFilesByDir)
+            } else {
+                if (item.size > SMALL_FILE_THRESHOLD) {
+                    bigFiles.add(item)
+                } else {
+                    dirList.add(item)
+                }
+            }
+        }
+    }
+
+    private fun createZipArchiveForFiles(smallFiles: List<RemoteFile>): ByteArray {
+        val bos = ByteArrayOutputStream()
+        ZipOutputStream(bos, StandardCharsets.UTF_8).use { zos ->
+            zos.setLevel(Deflater.BEST_SPEED)
+            for (file in smallFiles) {
+                val entry = ZipEntry(file.name)
+                val zipTime = if (file.lastModified < 315532800000L) 315532800000L else minOf(file.lastModified, 4354819199000L)
+                entry.time = zipTime
+                zos.putNextEntry(entry)
+                openFile(file.path).use { input ->
+                    input.copyTo(zos)
+                }
+                zos.closeEntry()
+            }
+        }
+        return bos.toByteArray()
+    }
+
+    private fun enqueueZipData(transferPath: String, zipBytes: ByteArray, lastModified: Long) {
+        if (isShutdown) return
+        val currentFileIndex = fileIndexCounter.incrementAndGet()
+        val fileLength = zipBytes.size.toLong()
+        var remaining = fileLength
+
+        if (fileLength == 0L) {
+            val buffer = pollBuffer() ?: return
+            synchronized(queueLock) {
+                if (isShutdown) {
+                    buffers.offer(buffer)
+                    return
+                }
+                deque.put(
+                    FileBlock(
+                        isFile = true,
+                        fileIndex = currentFileIndex,
+                        path = transferPath,
+                        lastModified = lastModified,
+                        totalSize = 0L,
+                        index = 0,
+                        data = buffer,
+                        dataLength = 0
+                    )
+                )
+            }
+            return
+        }
+
+        var blockIndex = 0
+        var zipOffset = 0
+        while (remaining > 0L && !isShutdown) {
+            val blockSize = minOf(remaining, FileBlock.BLOCK_SIZE.toLong()).toInt()
+            val buffer = pollBuffer() ?: break
+            System.arraycopy(zipBytes, zipOffset, buffer, 0, blockSize)
+
+            synchronized(queueLock) {
+                if (isShutdown) {
+                    buffers.offer(buffer)
+                    return
+                }
+                deque.put(
+                    FileBlock(
+                        isFile = true,
+                        fileIndex = currentFileIndex,
+                        path = transferPath,
+                        lastModified = lastModified,
+                        totalSize = fileLength,
+                        index = blockIndex,
+                        data = buffer,
+                        dataLength = blockSize
+                    )
+                )
+            }
+
+            remaining -= blockSize.toLong()
+            zipOffset += blockSize
+            blockIndex++
         }
     }
 

@@ -14,7 +14,8 @@ data class AppConfig(
     val boundInterfaces: List<String> = emptyList(),
     val bufferCount: Int = DEFAULT_BUFFER_COUNT,
     val keepScreenOn: Boolean = true,
-    val enableSoundNotification: Boolean = true
+    val enableSoundNotification: Boolean = true,
+    val enable4KFriendly: Boolean = false
 ) {
     companion object {
         const val DEFAULT_PORT: Int = 5740

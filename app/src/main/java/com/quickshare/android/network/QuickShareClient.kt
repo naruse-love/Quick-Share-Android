@@ -84,6 +84,10 @@ interface IQuickShareClient : Closeable, AutoCloseable {
     ): Boolean
 
     suspend fun disconnect()
+
+    var enable4KFriendly: Boolean
+        get() = false
+        set(value) {}
 }
 
 /**
@@ -96,6 +100,8 @@ class QuickShareClient(
     val socketFactory: IMultiPathSocketFactory = MultiPathSocketFactory(),
     val trafficManager: TrafficManager = TrafficManager()
 ) : IQuickShareClient {
+
+    override var enable4KFriendly: Boolean = false
 
     private val clientScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val controlMutex = Mutex()
@@ -508,7 +514,8 @@ class QuickShareClient(
                 localDir = localDir,
                 remoteDir = remoteDir,
                 operateThreadCount = dataConnections.size,
-                storageResolver = { p -> storageManager.openForRead(p) }
+                storageResolver = { p -> storageManager.openForRead(p) },
+                enable4KFriendly = enable4KFriendly
             )
 
             val readJob = launch { readFileCall.executeAsync() }
@@ -706,7 +713,8 @@ class QuickShareClient(
                     localDir = localDir,
                     remoteDir = remoteDir,
                     operateThreadCount = dataConnections.size,
-                    storageResolver = { p -> storageManager.openForRead(p) }
+                    storageResolver = { p -> storageManager.openForRead(p) },
+                    enable4KFriendly = enable4KFriendly
                 )
 
                 supervisorScope {

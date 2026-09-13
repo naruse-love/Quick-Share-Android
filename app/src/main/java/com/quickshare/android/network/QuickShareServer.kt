@@ -76,6 +76,9 @@ interface IQuickShareServer : Closeable, AutoCloseable {
     suspend fun stop()
 
     // Server-initiated operations to connected client
+    var enable4KFriendly: Boolean
+        get() = false
+        set(value) {}
     suspend fun listRemoteFiles(path: String): List<RemoteFile>?
     suspend fun deleteRemoteFile(path: String): Boolean
     suspend fun createRemoteDir(parent: String, child: String): Boolean
@@ -103,6 +106,8 @@ class QuickShareServer(
     val interfaceEnumerator: IInterfaceEnumerator = InterfaceEnumerator(),
     val trafficManager: TrafficManager = TrafficManager()
 ) : IQuickShareServer {
+
+    override var enable4KFriendly: Boolean = false
 
     private val serverScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val controlMutex = Mutex()
@@ -566,7 +571,8 @@ class QuickShareServer(
                 localDir = localDir,
                 remoteDir = remoteDir,
                 operateThreadCount = dataConnections.size,
-                storageResolver = { p -> storageManager.openForRead(p) }
+                storageResolver = { p -> storageManager.openForRead(p) },
+                enable4KFriendly = enable4KFriendly
             )
 
             val readJob = launch { readFileCall.executeAsync() }
@@ -746,7 +752,8 @@ class QuickShareServer(
                     localDir = localDir,
                     remoteDir = remoteDir,
                     operateThreadCount = dataConnections.size,
-                    storageResolver = { p -> storageManager.openForRead(p) }
+                    storageResolver = { p -> storageManager.openForRead(p) },
+                    enable4KFriendly = enable4KFriendly
                 )
 
                 supervisorScope {

@@ -30,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -186,6 +187,32 @@ fun ConnectionScreen(
                                 enabled = uiState.status != ClientConnectionStatus.CONNECTED && uiState.status != ClientConnectionStatus.CONNECTING
                             )
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 4K Friendly Mode Switch
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "💾 硬盘 4K 友好模式",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "传输文件夹时自动压缩≤128KB小文件",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = uiState.enable4KFriendly,
+                            onCheckedChange = { viewModel.on4KFriendlyToggled(it) }
+                        )
                     }
                 }
             }

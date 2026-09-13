@@ -47,6 +47,7 @@ class AppConfigRepository(
         val bufferCount = prefs.getInt(KEY_BUFFER_COUNT, AppConfig.DEFAULT_BUFFER_COUNT)
         val keepScreenOn = prefs.getBoolean(KEY_KEEP_SCREEN_ON, true)
         val enableSound = prefs.getBoolean(KEY_ENABLE_SOUND, true)
+        val enable4KFriendly = prefs.getBoolean(KEY_ENABLE_4K_FRIENDLY, false)
 
         val nicsJson = prefs.getString(KEY_BOUND_NICS, null)
         val boundNics: List<String> = if (!nicsJson.isNullOrEmpty()) {
@@ -68,7 +69,8 @@ class AppConfigRepository(
             boundInterfaces = boundNics,
             bufferCount = bufferCount,
             keepScreenOn = keepScreenOn,
-            enableSoundNotification = enableSound
+            enableSoundNotification = enableSound,
+            enable4KFriendly = enable4KFriendly
         )
     }
 
@@ -93,6 +95,7 @@ class AppConfigRepository(
             .putInt(KEY_BUFFER_COUNT, newConfig.bufferCount)
             .putBoolean(KEY_KEEP_SCREEN_ON, newConfig.keepScreenOn)
             .putBoolean(KEY_ENABLE_SOUND, newConfig.enableSoundNotification)
+            .putBoolean(KEY_ENABLE_4K_FRIENDLY, newConfig.enable4KFriendly)
             .putString(KEY_BOUND_NICS, gson.toJson(newConfig.boundInterfaces))
             .apply()
     }
@@ -129,6 +132,7 @@ class AppConfigRepository(
         private const val KEY_BUFFER_COUNT = "pref_buffer_count"
         private const val KEY_KEEP_SCREEN_ON = "pref_keep_screen_on"
         private const val KEY_ENABLE_SOUND = "pref_enable_sound"
+        private const val KEY_ENABLE_4K_FRIENDLY = "pref_enable_4k_friendly"
         private const val KEY_BOUND_NICS = "pref_bound_nics"
         private const val KEY_HISTORY = "pref_conn_history"
         const val MAX_HISTORY_ITEMS = 20
